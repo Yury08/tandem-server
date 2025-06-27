@@ -1,0 +1,149 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserWallet {
+  id             String   @id @default(cuid())
+  telegramId     Int      @map("telegram_id")
+  wallet_address String   @unique
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([telegramId])
+  @@map("user_wallet")
+}
+
+model Pool {
+  id              String        @id @default(cuid())
+  title           String
+  totalAmount     Decimal       @default(0) @map("total_amount") @db.Decimal(20, 9)
+  minContribution Decimal       @default(1) @map("min_contribution") @db.Decimal(20, 9)
+  creator         String
+  startAt         DateTime      @default(now()) @map("start_at")
+  endAt           DateTime      @map("end_at")
+  targetWallet    String        @map("target_wallet")
+  status          PoolStatus    @default(active)
+  isOpen          Boolean       @default(true) @map("is_open")
+  Participant     Participant[]
+
+  @@index([creator])
+  @@index([status])
+  @@index([isOpen])
+  @@index([endAt])
+  @@map("pool")
+}
+
+enum PoolStatus {
+  active
+  completed
+  refunded
+}
+
+model Participant {
+  id           String   @id @default(cuid())
+  telegramId   Int      @map("telegram_id")
+  joinedAt     DateTime @default(now()) @map("joined_at")
+  contribution BigInt   @default(0)
+  sent         Boolean  @default(false)
+  invite_token String?
+  poolId       String   @map("pool_id")
+  pool         Pool     @relation(fields: [poolId], references: [id])
+
+  @@index([telegramId])
+  @@index([poolId])
+  @@map("participant")
+}
+
+// Оплата приложению после оплаты из главного пула
+model SplitOrder {
+  id                String         @id @default(cuid())
+  contractAddress   String         @map("contract_address")
+  buyerId           Int            @map("buyer_id")
+  sellerId          Int            @map("seller_id")
+  totalAmount       BigInt         @map("total_amount")
+  installmentCount  Int            @map("installment_count") // кол. платежей
+  installmentAmount BigInt         @map("installment_amount") // сумма одного плятежа
+  nextPaymentDate   DateTime?      @map("next_payment_date")
+  status            SplitStatus    @default(active)
+  productMetadata   Json?          @map("product_metadata")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  SplitPayment      SplitPayment[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+  @@map("split_order")
+}
+
+model SplitPayment {
+  id                String     @id @default(cuid())
+  orderId           SplitOrder @relation(fields: [splitOrderId], references: [id])
+  splitOrderId      String     @map("split_order_id")
+  installmentNumber Int        @default(1) @map("installment_number") // номер платежа
+  dueDate           DateTime   @map("due_date") // когда платеж должен быть завершен
+  paidAt            DateTime   @map("paid_at") // фактическая дата совершение платежа
+  txHash            String?    @map("tx_hash") // хеш транзакции TON для подтверждения
+  penaltyAdded      Boolean    @default(false) @map("penalty_added")
+
+  @@index([splitOrderId])
+  @@map("split_payment")
+}
+
+model PoolMain {
+  id                   String                 @id @default(cuid())
+  address              String                 @unique
+  totalLiquidity       Decimal                @default(0) @map("total_liquidity") @db.Decimal(20, 9)
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  LiquidityContributor LiquidityContributor[]
+
+  @@map("pool_main")
+}
+
+model LiquidityContributor {
+  id          String    @id @default(cuid())
+  telegramId  Int       @unique @map("telegram_id")
+  amount      Decimal   @default(0) @db.Decimal(20, 9) // сколько вложенно в главный пул
+  share       Decimal   @db.Decimal(20, 9) // расчетная доля пользователя в пуле
+  lockedUntil DateTime? @map("locked_until") // Дата, до которой запрещен вывод без штрафа
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  mainPoolId  PoolMain  @relation(fields: [poolMainId], references: [id])
+  poolMainId  String    @map("pool_main_id")
+
+  @@index([poolMainId])
+  @@map("liquidity_contributor")
+}
+
+// Оплата сплит транзакции из главного пула
+model SplitTransaction {
+  id                    String      @id @default(cuid())
+  buyerId               Int         @map("buyer_id")
+  vendorId              Int         @map("vendor_id")
+  amount                BigInt
+  installmentsRemaining Int         @map("installments_remaining") // сколько платежей осталось
+  status                SplitStatus @default(active)
+  createdAt             DateTime    @default(now()) @map("created_at")
+
+  @@index([buyerId])
+  @@index([vendorId])
+  @@index([status])
+  @@map("split_transaction")
+}
+
+enum SplitStatus {
+  active
+  completed
+  broken
+}
